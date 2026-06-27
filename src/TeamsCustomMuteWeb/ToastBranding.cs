@@ -40,7 +40,13 @@ internal static class ToastBranding
         if (string.IsNullOrEmpty(exePath))
             return;
 
-        if (File.Exists(shortcutPath) && ShortcutIsCurrent(shortcutPath, exePath))
+        // Re-create the shortcut unless it already points at this exe AND carries the matching
+        // AppUserModelID. Windows only shows toast *banners* when a Start-menu shortcut with a
+        // matching AppUserModelID exists; a shortcut missing that property silently demotes our
+        // notifications to the notification center only.
+        if (File.Exists(shortcutPath)
+            && ShortcutIsCurrent(shortcutPath, exePath)
+            && string.Equals(ReadShortcutAumid(shortcutPath), AppId, StringComparison.Ordinal))
             return;
 
         Directory.CreateDirectory(startMenu);
@@ -50,12 +56,19 @@ internal static class ToastBranding
         link.SetIconLocation(exePath, 0);
         link.SetArguments(string.Empty);
         link.SetWorkingDirectory(Path.GetDirectoryName(exePath) ?? string.Empty);
+        ((IPersistFile)link).Save(shortcutPath, true);
 
-        // Stamp the AppUserModelID onto the shortcut so Windows associates this process's
-        // notifications with it.
-        var store = (IPropertyStore)link;
+        // Stamp the AppUserModelID via the saved file's property store. Writing it through the
+        // IShellLink's own property store does not reliably persist, so we open the saved .lnk
+        // read/write and set the property there.
+        StampShortcutAumid(shortcutPath, AppId);
+    }
+
+    private static void StampShortcutAumid(string shortcutPath, string aumid)
+    {
+        var store = GetStore(shortcutPath, GPS_READWRITE);
         var key = PKEY_AppUserModel_ID;
-        var pv = new PROPVARIANT { vt = VT_LPWSTR, p = Marshal.StringToCoTaskMemUni(AppId) };
+        var pv = new PROPVARIANT { vt = VT_LPWSTR, p = Marshal.StringToCoTaskMemUni(aumid) };
         try
         {
             store.SetValue(ref key, ref pv);
@@ -63,11 +76,46 @@ internal static class ToastBranding
         }
         finally
         {
-            // Frees the LPWSTR allocated above via CoTaskMemFree.
             PropVariantClear(ref pv);
+            Marshal.ReleaseComObject(store);
         }
+    }
 
-        ((IPersistFile)link).Save(shortcutPath, true);
+    private static string? ReadShortcutAumid(string shortcutPath)
+    {
+        IPropertyStore? store = null;
+        try
+        {
+            store = GetStore(shortcutPath, GPS_DEFAULT);
+            var key = PKEY_AppUserModel_ID;
+            store.GetValue(ref key, out var pv);
+            try
+            {
+                return pv.vt == VT_LPWSTR && pv.p != IntPtr.Zero
+                    ? Marshal.PtrToStringUni(pv.p)
+                    : null;
+            }
+            finally
+            {
+                PropVariantClear(ref pv);
+            }
+        }
+        catch
+        {
+            return null;
+        }
+        finally
+        {
+            if (store != null)
+                Marshal.ReleaseComObject(store);
+        }
+    }
+
+    private static IPropertyStore GetStore(string path, int flags)
+    {
+        var iid = typeof(IPropertyStore).GUID;
+        SHGetPropertyStoreFromParsingName(path, IntPtr.Zero, flags, ref iid, out var store);
+        return store;
     }
 
     private static bool ShortcutIsCurrent(string shortcutPath, string exePath)
@@ -87,9 +135,19 @@ internal static class ToastBranding
     }
 
     private const ushort VT_LPWSTR = 31;
+    private const int GPS_DEFAULT = 0;
+    private const int GPS_READWRITE = 0x2;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
     private static extern void SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string appID);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    private static extern void SHGetPropertyStoreFromParsingName(
+        [MarshalAs(UnmanagedType.LPWStr)] string pszPath,
+        IntPtr zeroWorks,
+        int flags,
+        ref Guid riid,
+        [MarshalAs(UnmanagedType.Interface)] out IPropertyStore propertyStore);
 
     [DllImport("ole32.dll")]
     private static extern int PropVariantClear(ref PROPVARIANT pvar);
