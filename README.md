@@ -1,5 +1,8 @@
 # Teams Custom Mute 🔕
 
+> 🚧 **Status: early release (v0.x).** Tested only by the author on Windows + Edge.
+> Expect rough edges — feedback and issues are welcome.
+
 Mute a Microsoft Teams chat for *exactly* as long as you want — 1 hour, a day, a week,
 or any custom number of hours — and it un-mutes itself automatically when the time is up.
 
