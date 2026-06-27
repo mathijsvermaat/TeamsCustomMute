@@ -40,7 +40,7 @@ chats, temporary group threads, or "please stop pinging me until tomorrow" momen
 - **Microsoft Edge** installed (the app automates Teams web through Edge)
 - A Microsoft Teams account you can sign in to at <https://teams.microsoft.com>
 
-To **build** from source you also need the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
+To **build** from source you also need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ---
 
@@ -147,6 +147,3 @@ focused. Good first contributions:
 ## License
 
 [MIT](LICENSE) © Mathijs Vermaat
-
-Inspired by [shanselman/PeekDesktop](https://github.com/shanselman/PeekDesktop) — a great example
-of a tiny, useful Windows tray utility shared as open source.
