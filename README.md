@@ -51,10 +51,15 @@ To **build** from source you also need the [.NET 10 SDK](https://dotnet.microsof
 
 ### Download and run (no build required)
 
-Grab the latest **`TeamsCustomMute-vX.Y.Z-win-x64.exe`** from the
-[**Releases** page](https://github.com/mathijsvermaat/TeamsCustomMute/releases/latest) and just
-run it — it's a self-contained single executable, so no .NET install is needed. Windows
-SmartScreen may warn about an unknown publisher; choose **More info → Run anyway**.
+1. Download the latest **`TeamsCustomMute-vX.Y.Z-win-x64.zip`** from the
+   [**Releases** page](https://github.com/mathijsvermaat/TeamsCustomMute/releases/latest).
+2. **Right-click the zip → Extract All** to a folder of your choice.
+3. Run **`TeamsCustomMuteWeb.exe`** from the extracted folder.
+
+It's self-contained, so no separate .NET install is needed. Keep the extracted files
+together — the app ships with a small browser-automation helper next to the exe, so it
+won't run if you copy the `.exe` out on its own. Windows SmartScreen may warn about an
+unknown publisher; choose **More info → Run anyway**.
 
 ### Run from source
 
