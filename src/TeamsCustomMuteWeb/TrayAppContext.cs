@@ -237,7 +237,7 @@ public sealed class TrayAppContext : ApplicationContext
                     ok ? "Signed in" : "Sign-in incomplete",
                     ok
                         ? "Teams web is connected. Muting now runs silently in the background."
-                        : "Couldn't confirm sign-in. Try \u201cSign in to Teams web\u2026\u201d again.");
+                        : "Couldn't open the Teams web window. Close any open Microsoft Edge windows, then try \u201cSign in to Teams web\u2026\u201d again.");
             }, null));
     }
 

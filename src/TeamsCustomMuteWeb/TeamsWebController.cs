@@ -73,15 +73,18 @@ public sealed class TeamsWebController : IAsyncDisposable
         await _gate.WaitAsync();
         try
         {
+            Log.Info("SignIn: opening visible Edge window…");
             await EnsureStartedAsync(headless: false);
             await _page!.BringToFrontAsync();
             var ready = await IsReadyAsync(_page, (int)timeout.TotalMilliseconds);
+            Log.Info($"SignIn: ready={ready}; switching back to background context");
             // Switch back to a silent background context for normal muting.
             await EnsureStartedAsync(headless: true);
             return ready;
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Error("SignIn failed", ex);
             return false;
         }
         finally
@@ -248,16 +251,17 @@ public sealed class TeamsWebController : IAsyncDisposable
         // headless flag can't be flipped at runtime — so tear down and recreate.
         await StopContextAsync();
 
-        _pw ??= await Playwright.CreateAsync();
+        if (_pw is null)
+        {
+            Log.Info("Playwright: creating driver…");
+            _pw = await Playwright.CreateAsync();
+            Log.Info("Playwright: driver created");
+        }
         Directory.CreateDirectory(UserDataDir);
 
-        _context = await _pw.Chromium.LaunchPersistentContextAsync(UserDataDir, new BrowserTypeLaunchPersistentContextOptions
-        {
-            Channel = "msedge",
-            Headless = headless,
-            ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
-            Args = new[] { "--disable-blink-features=AutomationControlled" },
-        });
+        Log.Info($"Playwright: launching msedge persistent context (headless={headless})…");
+        _context = await LaunchPersistentWithRetryAsync(headless);
+        Log.Info("Playwright: context launched");
         _headless = headless;
 
         _page = _context.Pages.Count > 0 ? _context.Pages[0] : await _context.NewPageAsync();
@@ -265,6 +269,37 @@ public sealed class TeamsWebController : IAsyncDisposable
 
         if (!(_page.Url ?? string.Empty).Contains("teams.microsoft.com", StringComparison.OrdinalIgnoreCase))
             await _page.GotoAsync(TeamsUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+    }
+
+    /// <summary>
+    /// Launches the persistent Edge context, retrying a few times on failure. Edge sometimes
+    /// closes the freshly launched browser immediately — typically because the previous context
+    /// hasn't released the user-data-dir lock yet, or because the stable channel briefly hands
+    /// off to another running Edge. A short wait between attempts clears these transient cases.
+    /// </summary>
+    private async Task<IBrowserContext> LaunchPersistentWithRetryAsync(bool headless)
+    {
+        var options = new BrowserTypeLaunchPersistentContextOptions
+        {
+            Channel = "msedge",
+            Headless = headless,
+            ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
+            Args = new[] { "--disable-blink-features=AutomationControlled" },
+        };
+
+        const int maxAttempts = 5;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return await _pw!.Chromium.LaunchPersistentContextAsync(UserDataDir, options);
+            }
+            catch (Exception ex) when (attempt < maxAttempts)
+            {
+                Log.Error($"Playwright: launch attempt {attempt}/{maxAttempts} failed, retrying", ex);
+                await Task.Delay(900);
+            }
+        }
     }
 
     private async Task StopContextAsync()

@@ -7,6 +7,15 @@ internal static class Program
     [STAThread]
     private static void Main()
     {
+        // Hidden support mode: exercise the Teams web sign-in once, write the result and any
+        // exception to the log file, then exit. Run from the install folder:
+        //   TeamsCustomMuteWeb.exe --diagnose-signin
+        if (Environment.GetCommandLineArgs().Contains("--diagnose-signin"))
+        {
+            RunSignInDiagnostic();
+            return;
+        }
+
         using var mutex = new Mutex(initiallyOwned: true, "TeamsCustomMuteWeb.SingleInstance", out var isNew);
         if (!isNew)
             return;
@@ -33,6 +42,30 @@ internal static class Program
         catch
         {
             // nothing else we can do
+        }
+    }
+
+    private static void RunSignInDiagnostic()
+    {
+        Log.Info("=== diagnose-signin start ===");
+        var controller = new TeamsWebController();
+        try
+        {
+            // Mimic the real app: a headless background context starts first, then the user
+            // triggers an interactive (headful) sign-in which tears that down and relaunches.
+            var initial = controller.IsSignedInAsync().GetAwaiter().GetResult();
+            Log.Info($"diagnose-signin: initial IsSignedIn={initial}");
+            var ok = controller.SignInInteractiveAsync(TimeSpan.FromSeconds(25)).GetAwaiter().GetResult();
+            Log.Info($"diagnose-signin result: ok={ok}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("diagnose-signin threw", ex);
+        }
+        finally
+        {
+            try { controller.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { /* ignore */ }
+            Log.Info("=== diagnose-signin end ===");
         }
     }
 }
