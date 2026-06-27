@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>TeamsCustomMuteWeb</AssemblyName>
+    <RootNamespace>TeamsCustomMute</RootNamespace>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Playwright" Version="1.49.0" />
+  </ItemGroup>
+
+  <!-- Embed the icon so the tray and dialogs can load it without a file dependency. -->
+  <ItemGroup>
+    <EmbeddedResource Include="app.ico" />
+    <None Remove="make-icon.ps1" />
+  </ItemGroup>
+
+</Project>
