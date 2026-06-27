@@ -272,13 +272,16 @@ public sealed class TrayAppContext : ApplicationContext
     }
 
     /// <summary>
-    /// Shows a tray notification. Passing <see cref="ToolTipIcon.None"/> tells Windows to use
-    /// the tray icon's own image (our app icon) in the toast instead of the generic blue
-    /// "info" glyph that <see cref="ToolTipIcon.Info"/> would force.
+    /// Shows a tray notification. Once <see cref="ToastBranding"/> has registered an explicit
+    /// AppUserModelID, <see cref="NotifyIcon.ShowBalloonTip(int, string, string, ToolTipIcon)"/>
+    /// is routed through the modern Windows toast pipeline, where the app icon and name come
+    /// from the branded shortcut. A toast built with <see cref="ToolTipIcon.None"/> is delivered
+    /// to the notification center but its banner is suppressed, so we pass
+    /// <see cref="ToolTipIcon.Info"/> to make the banner appear reliably.
     /// </summary>
     private void ShowBalloon(string title, string text)
     {
-        _icon.ShowBalloonTip(5000, title, text, ToolTipIcon.None);
+        _icon.ShowBalloonTip(5000, title, text, ToolTipIcon.Info);
     }
 
     private static string FormatRemaining(TimeSpan t)
