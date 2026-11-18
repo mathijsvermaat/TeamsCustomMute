@@ -21,6 +21,9 @@ publish/
 # VS Code (machine-specific settings)
 .vscode/
 
+# Local tests (not published)
+/tests/
+
 # Playwright browser downloads / driver cache
 .playwright/
 ms-playwright/
