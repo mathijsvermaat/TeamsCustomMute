@@ -26,7 +26,7 @@ public sealed class TeamsWebController : IAsyncDisposable
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "TeamsCustomMute", "EdgeProfile");
 
-    private const string TeamsUrl = "https://teams.microsoft.com/v2/";
+    private const string TeamsUrl = "https://teams.cloud.microsoft/";
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private IPlaywright? _pw;
@@ -267,7 +267,7 @@ public sealed class TeamsWebController : IAsyncDisposable
         _page = _context.Pages.Count > 0 ? _context.Pages[0] : await _context.NewPageAsync();
         _page.SetDefaultTimeout(20000);
 
-        if (!(_page.Url ?? string.Empty).Contains("teams.microsoft.com", StringComparison.OrdinalIgnoreCase))
+        if (!IsTeamsPage(_page.Url))
             await _page.GotoAsync(TeamsUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
     }
 
@@ -317,11 +317,17 @@ public sealed class TeamsWebController : IAsyncDisposable
         _page = null;
     }
 
+    private static bool IsTeamsPage(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && (uri.Host.Equals("teams.microsoft.com", StringComparison.OrdinalIgnoreCase)
+            || uri.Host.Equals("teams.cloud.microsoft", StringComparison.OrdinalIgnoreCase));
+
     private static async Task<bool> IsReadyAsync(IPage page, int timeoutMs)
     {
         try
         {
-            if (!(page.Url ?? string.Empty).Contains("teams.microsoft.com", StringComparison.OrdinalIgnoreCase))
+            if (!IsTeamsPage(page.Url))
                 await page.GotoAsync(TeamsUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
 
             await page.GetByRole(AriaRole.Treeitem).First.WaitForAsync(new LocatorWaitForOptions { Timeout = timeoutMs });
@@ -350,33 +356,65 @@ public sealed class TeamsWebController : IAsyncDisposable
         }
 
         await row.ScrollIntoViewIfNeededAsync();
-        await row.ClickAsync(new LocatorClickOptions { Button = MouseButton.Right });
-
-        var wanted = mute ? "Mute" : "Unmute";
-        var opposite = mute ? "Unmute" : "Mute";
-
-        var wantedItem = page.GetByRole(AriaRole.Menuitem,
-            new PageGetByRoleOptions { NameRegex = new Regex($"^{wanted}$", RegexOptions.IgnoreCase) });
-
-        if (await WaitVisibleAsync(wantedItem, 4000))
+        try
         {
-            await wantedItem.ClickAsync();
-            return MuteOutcome.Success;
+            await row.ClickAsync(new LocatorClickOptions { Button = MouseButton.Right });
+            var notifications = await OpenNotificationsMenuAsync(page);
+            if (notifications is not null)
+            {
+                var current = await ReadNotificationMuteStateAsync(notifications);
+                if (current is null)
+                    return MuteOutcome.MenuNotFound;
+                if (current == mute)
+                    return MuteOutcome.AlreadyInDesiredState;
+
+                var option = NotificationOption(notifications, mute);
+                if (!await WaitVisibleAsync(option, 4000))
+                    return MuteOutcome.MenuNotFound;
+
+                await option.ClickAsync();
+                await CloseChatMenuAsync(page);
+                await row.ClickAsync(new LocatorClickOptions { Button = MouseButton.Right });
+                notifications = await OpenNotificationsMenuAsync(page);
+                if (notifications is null)
+                    return MuteOutcome.AutomationError;
+
+                var selected = NotificationOption(notifications, mute)
+                    .And(notifications.Locator("[aria-checked='true']"));
+                return await WaitVisibleAsync(selected, 4000)
+                    ? MuteOutcome.Success
+                    : MuteOutcome.AutomationError;
+            }
+
+            var wanted = mute ? "Mute" : "Unmute";
+            var opposite = mute ? "Unmute" : "Mute";
+            var wantedItem = page.GetByRole(AriaRole.Menuitem,
+                new PageGetByRoleOptions { NameRegex = new Regex($"^{wanted}$", RegexOptions.IgnoreCase) });
+
+            if (await WaitVisibleAsync(wantedItem, 4000))
+            {
+                await wantedItem.ClickAsync();
+                await CloseChatMenuAsync(page);
+                return await GetMuteStateCoreAsync(page, chat) == mute
+                    ? MuteOutcome.Success
+                    : MuteOutcome.AutomationError;
+            }
+
+            var oppositeItem = page.GetByRole(AriaRole.Menuitem,
+                new PageGetByRoleOptions { NameRegex = new Regex($"^{opposite}$", RegexOptions.IgnoreCase) });
+            return await oppositeItem.IsVisibleAsync()
+                ? MuteOutcome.AlreadyInDesiredState
+                : MuteOutcome.MenuNotFound;
         }
-
-        // The wanted item isn't there — check whether the chat is already in the desired state.
-        var oppositeItem = page.GetByRole(AriaRole.Menuitem,
-            new PageGetByRoleOptions { NameRegex = new Regex($"^{opposite}$", RegexOptions.IgnoreCase) });
-        var alreadyThere = await oppositeItem.CountAsync() > 0;
-
-        await page.Keyboard.PressAsync("Escape");
-        return alreadyThere ? MuteOutcome.AlreadyInDesiredState : MuteOutcome.MenuNotFound;
+        finally
+        {
+            await CloseChatMenuAsync(page);
+        }
     }
 
     /// <summary>
-    /// Right-clicks a chat and reads its current mute state from the context menu without
-    /// changing it: the menu shows "Unmute" when muted and "Mute" when not. Returns null if
-    /// the chat or menu can't be found.
+    /// Reads the selected notification option, or the legacy Mute/Unmute action, without
+    /// changing settings. Returns null if the chat or notification state can't be found.
     /// </summary>
     private static async Task<bool?> GetMuteStateCoreAsync(IPage page, string chat)
     {
@@ -387,21 +425,67 @@ public sealed class TeamsWebController : IAsyncDisposable
             return null; // Not visible in the rail; don't disturb the UI by searching.
 
         await row.ScrollIntoViewIfNeededAsync();
-        await row.ClickAsync(new LocatorClickOptions { Button = MouseButton.Right });
+        try
+        {
+            await row.ClickAsync(new LocatorClickOptions { Button = MouseButton.Right });
+            var notifications = await OpenNotificationsMenuAsync(page);
+            if (notifications is not null)
+                return await ReadNotificationMuteStateAsync(notifications);
 
-        var unmuteItem = page.GetByRole(AriaRole.Menuitem,
-            new PageGetByRoleOptions { NameRegex = new Regex("^Unmute$", RegexOptions.IgnoreCase) });
-        var muteItem = page.GetByRole(AriaRole.Menuitem,
-            new PageGetByRoleOptions { NameRegex = new Regex("^Mute$", RegexOptions.IgnoreCase) });
+            var unmuteItem = page.GetByRole(AriaRole.Menuitem,
+                new PageGetByRoleOptions { NameRegex = new Regex("^Unmute$", RegexOptions.IgnoreCase) });
+            var muteItem = page.GetByRole(AriaRole.Menuitem,
+                new PageGetByRoleOptions { NameRegex = new Regex("^Mute$", RegexOptions.IgnoreCase) });
 
-        bool? muted = null;
-        if (await WaitVisibleAsync(unmuteItem, 3000))
-            muted = true;
-        else if (await muteItem.CountAsync() > 0)
-            muted = false;
+            if (await WaitVisibleAsync(unmuteItem, 3000))
+                return true;
+            if (await muteItem.IsVisibleAsync())
+                return false;
+            return null;
+        }
+        finally
+        {
+            await CloseChatMenuAsync(page);
+        }
+    }
 
+    private static async Task<ILocator?> OpenNotificationsMenuAsync(IPage page)
+    {
+        var manage = page.GetByRole(AriaRole.Menuitem,
+            new PageGetByRoleOptions { Name = "Manage notifications", Exact = true });
+        if (!await WaitVisibleAsync(manage, 1500))
+            return null;
+
+        await manage.HoverAsync();
+        var menu = page.GetByRole(AriaRole.Menu,
+            new PageGetByRoleOptions { Name = "Manage notifications", Exact = true });
+        return await WaitVisibleAsync(menu, 4000) ? menu : null;
+    }
+
+    private static ILocator NotificationOption(ILocator menu, bool mute) =>
+        menu.GetByRole(AriaRole.Menuitemradio, new LocatorGetByRoleOptions
+        {
+            NameRegex = new Regex(mute ? @"^Mute(?:\s|$)" : @"^All new messages(?:\s|$)", RegexOptions.IgnoreCase),
+        });
+
+    private static async Task<bool?> ReadNotificationMuteStateAsync(ILocator menu)
+    {
+        var mute = NotificationOption(menu, true);
+        if (!await WaitVisibleAsync(mute, 1500))
+            return null;
+
+        return await mute.GetAttributeAsync("aria-checked") switch
+        {
+            "true" => true,
+            "false" => false,
+            _ => null,
+        };
+    }
+
+    private static async Task CloseChatMenuAsync(IPage page)
+    {
         await page.Keyboard.PressAsync("Escape");
-        return muted;
+        await page.Keyboard.PressAsync("Escape");
     }
 
     /// <summary>Best-effort: use the Teams search/command box to surface a chat not shown in the rail.</summary>

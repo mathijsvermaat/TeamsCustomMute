@@ -25,3 +25,13 @@ jobs:
 
       - name: Build
         run: dotnet build TeamsCustomMute.sln -c Release --no-restore
+
+      - name: Build menu regression tests
+        run: dotnet build tests/TeamsCustomMuteWeb.Tests/TeamsCustomMuteWeb.Tests.csproj -c Release
+
+      - name: Install test browser
+        shell: pwsh
+        run: ./tests/TeamsCustomMuteWeb.Tests/bin/Release/net10.0-windows/playwright.ps1 install chromium
+
+      - name: Test menu compatibility
+        run: dotnet test tests/TeamsCustomMuteWeb.Tests/TeamsCustomMuteWeb.Tests.csproj -c Release --no-build
